@@ -185,6 +185,7 @@
   <script>
     const SHEET_ID = "1xJr1arKCk1x_oiNT6dpt555zskHAbMEMYF3o3Vhy-qs";
     const SHEET_GID = "0";
+    const AUTO_REFRESH_MS = 10000;
 
     const state = {
       rows: [],
@@ -366,6 +367,17 @@
       }
     }
 
+    async function refreshData() {
+      try {
+        const fresh = await loadRows();
+        state.rows = fresh;
+        state.loaded = true;
+        state.error = null;
+      } catch (_) {
+        // Keep last successful data set if refresh fails.
+      }
+    }
+
     async function searchAndRender(code) {
       hideResult();
       const cleanCode = String(code || "").trim();
@@ -407,6 +419,13 @@
       await ensureData();
       if (code) await searchAndRender(code);
       if (!code && !state.error) showMessage("Готово. Сканируйте QR или введите код вручную.", false);
+
+      // Auto-refresh so newly added rows in the sheet appear without page reload.
+      setInterval(async () => {
+        await refreshData();
+        const liveCode = extractCodeFromUrl() || el.input.value;
+        if (liveCode) await searchAndRender(liveCode);
+      }, AUTO_REFRESH_MS);
     })();
   </script>
 </body>
