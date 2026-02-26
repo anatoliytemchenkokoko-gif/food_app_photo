@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Проверка питания по QR</title>
+  <style>
+    :root {
+      --bg1: #f7f2e6;
+      --bg2: #e8f3ff;
+      --card: #ffffff;
+      --text: #1c2630;
+      --muted: #5f6d7a;
+      --accent: #0f7a5a;
+      --danger: #c63d2f;
+      --border: #d8dde3;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Arial", "Helvetica", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 10%, var(--bg2), transparent 35%),
+                  radial-gradient(circle at 90% 90%, #fff5df, transparent 35%),
+                  var(--bg1);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    .app {
+      width: min(680px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .top {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #f9fbfd;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      line-height: 1.2;
+    }
+
+    .sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .search {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .search input {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 1rem;
+    }
+
+    .search button {
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 1rem;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+
+    .content {
+      padding: 18px;
+    }
+
+    .name {
+      font-size: 1.55rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      word-break: break-word;
+    }
+
+    .photo {
+      width: 100%;
+      max-height: 72vh;
+      object-fit: contain;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fbfbfb;
+      display: none;
+    }
+
+    .msg {
+      padding: 12px;
+      border-radius: 10px;
+      background: #eef3f8;
+      color: #203040;
+      line-height: 1.3;
+    }
+
+    .msg.error {
+      background: #fcecea;
+      color: var(--danger);
+    }
+
+    .hidden { display: none; }
+
+    body.result-only {
+      padding: 0;
+      background: #f0ede5;
+    }
+
+    body.result-only .app {
+      width: 100%;
+      min-height: 100vh;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+
+    body.result-only .top {
+      display: none;
+    }
+
+    body.result-only .content {
+      width: min(760px, 100%);
+      padding: 0;
+    }
+
+    body.result-only .name {
+      text-align: center;
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      margin: 0 0 16px;
+    }
+
+    body.result-only .photo {
+      display: block;
+      width: 100%;
+      max-height: calc(100vh - 120px);
+      border-radius: 18px;
+      background: #fff;
+    }
+
+    body.result-only .msg {
+      margin-top: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="top">
+      <h1>Проверка питания</h1>
+      <div class="sub">Сканируйте QR или вставьте код вручную</div>
+      <form class="search" id="searchForm">
+        <input id="codeInput" placeholder="Введите код (ID из QR)" autocomplete="off" />
+        <button type="submit">Найти</button>
+      </form>
+    </section>
+
+    <section class="content">
+      <h2 class="name hidden" id="personName"></h2>
+      <img class="photo" id="personPhoto" alt="Фото участника" />
+      <div class="msg" id="status">Загрузка данных...</div>
+    </section>
+  </main>
+
+  <script>
+    const SHEET_ID = "1xJr1arKCk1x_oiNT6dpt555zskHAbMEMYF3o3Vhy-qs";
+    const SHEET_GID = "0";
+
+    const state = {
+      rows: [],
+      loaded: false,
+      error: null
+    };
+
+    const el = {
+      status: document.getElementById("status"),
+      name: document.getElementById("personName"),
+      photo: document.getElementById("personPhoto"),
+      form: document.getElementById("searchForm"),
+      input: document.getElementById("codeInput")
+    };
+
+    function normalizeKey(v) {
+      return String(v || "")
+        .toLowerCase()
+        .replace(/[\s_\-]/g, "")
+        .trim();
+    }
+
+    function getCandidate(row, keys) {
+      for (const key of keys) {
+        if (row[key]) return String(row[key]).trim();
+      }
+      return "";
+    }
+
+    function joinNameParts(...parts) {
+      return parts
+        .map((p) => String(p || "").trim())
+        .filter(Boolean)
+        .join(" ");
+    }
+
+    function normalizePhotoUrl(url) {
+      const raw = String(url || "").trim();
+      if (!raw) return "";
+
+      const m1 = raw.match(/drive\.google\.com\/open\?id=([^&]+)/i);
+      if (m1 && m1[1]) return `https://drive.google.com/uc?export=view&id=${m1[1]}`;
+
+      const m2 = raw.match(/drive\.google\.com\/file\/d\/([^/]+)/i);
+      if (m2 && m2[1]) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
+
+      return raw;
+    }
+
+    function showMessage(text, isError = false) {
+      el.status.textContent = text;
+      el.status.classList.toggle("error", isError);
+      el.status.classList.remove("hidden");
+    }
+
+    function hideResult() {
+      el.name.classList.add("hidden");
+      el.photo.style.display = "none";
+      el.photo.src = "";
+    }
+
+    function showPerson(person) {
+      el.name.textContent = person.fio || "Без ФИО";
+      el.name.classList.remove("hidden");
+
+      if (person.photo) {
+        el.photo.src = person.photo;
+        el.photo.style.display = "block";
+      } else {
+        el.photo.style.display = "none";
+      }
+
+      if (document.body.classList.contains("result-only")) {
+        el.status.classList.add("hidden");
+      } else {
+        showMessage("Найдено", false);
+      }
+    }
+
+    function parseGvizResponse(text) {
+      const start = text.indexOf("(");
+      const end = text.lastIndexOf(")");
+      if (start === -1 || end === -1) throw new Error("Некорректный ответ Google Sheets");
+      return JSON.parse(text.slice(start + 1, end));
+    }
+
+    async function loadRows() {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_GID}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Ошибка загрузки: ${res.status}`);
+      const raw = await res.text();
+      const json = parseGvizResponse(raw);
+
+      const cols = (json.table.cols || []).map((c) => normalizeKey(c.label || c.id));
+      const rawRows = json.table.rows || [];
+
+      const mapped = rawRows.map((r) => {
+        const row = {};
+        (r.c || []).forEach((cell, idx) => {
+          row[cols[idx] || `col${idx}`] = cell ? (cell.f || cell.v || "") : "";
+        });
+
+        const fio = getCandidate(row, ["фио", "fio", "fullname", "name", "участник", "сотрудник"]) ||
+          joinNameParts(
+            getCandidate(row, ["фио1", "firstname", "name1", "имя"]),
+            getCandidate(row, ["фио2", "middlename", "name2", "отчество"]),
+            getCandidate(row, ["фио3", "lastname", "name3", "фамилия"])
+          );
+
+        return {
+          code: getCandidate(row, ["qr", "код", "id", "uid", "badge", "бейдж", "token", "номер"]),
+          fio,
+          photo: normalizePhotoUrl(getCandidate(row, ["фото", "photo", "image", "avatar", "img", "photourl", "ссылкафото"])),
+          raw: row
+        };
+      }).filter((r) => r.code || r.fio || r.photo);
+
+      return mapped;
+    }
+
+    function extractCodeFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const direct = params.get("code") || params.get("qr") || params.get("id") || params.get("uid") || params.get("token");
+      if (direct) return direct.trim();
+
+      const path = window.location.pathname.split("/").filter(Boolean);
+      if (path.length) {
+        const last = decodeURIComponent(path[path.length - 1]);
+        if (last && !last.endsWith(".html")) return last.trim();
+      }
+
+      const hash = window.location.hash.replace(/^#/, "").trim();
+      if (hash) return decodeURIComponent(hash);
+
+      return "";
+    }
+
+    function findPerson(code) {
+      const c = String(code || "").trim().toLowerCase();
+      if (!c) return null;
+
+      return state.rows.find((r) => {
+        const codeVal = String(r.code || "").trim().toLowerCase();
+        if (!codeVal) return false;
+        return codeVal === c || codeVal.endsWith(`/${c}`);
+      }) || null;
+    }
+
+    async function ensureData() {
+      if (state.loaded || state.error) return;
+      try {
+        state.rows = await loadRows();
+        state.loaded = true;
+        if (!state.rows.length) {
+          showMessage("Таблица загружена, но записи не найдены. Проверьте заголовки столбцов: код/QR, ФИО, фото.", true);
+        }
+      } catch (err) {
+        state.error = err;
+        showMessage("Не удалось загрузить таблицу. Дайте доступ 'Все, у кого есть ссылка: Читатель' и проверьте интернет.", true);
+      }
+    }
+
+    async function searchAndRender(code) {
+      hideResult();
+      const cleanCode = String(code || "").trim();
+      if (!cleanCode) {
+        showMessage("Введите код или сканируйте QR", false);
+        return;
+      }
+
+      await ensureData();
+      if (state.error) return;
+
+      const person = findPerson(cleanCode);
+      if (!person) {
+        showMessage("Участник не найден", true);
+        return;
+      }
+
+      showPerson(person);
+    }
+
+    el.form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const code = el.input.value;
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("code", code);
+      history.replaceState({}, "", url);
+
+      await searchAndRender(code);
+    });
+
+    (async () => {
+      const code = extractCodeFromUrl();
+      if (code) {
+        document.body.classList.add("result-only");
+        el.input.value = code;
+        showMessage("Поиск по QR...", false);
+      }
+      await ensureData();
+      if (code) await searchAndRender(code);
+      if (!code && !state.error) showMessage("Готово. Сканируйте QR или введите код вручную.", false);
+    })();
+  </script>
+</body>
+</html>

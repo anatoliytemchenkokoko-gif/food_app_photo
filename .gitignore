@@ -1,0 +1,6 @@
+.idea/
+*.gsheet
+*.jpeg
+*.jpg
+*.png
+.DS_Store
