@@ -323,14 +323,33 @@
     }
 
     function findPerson(code) {
-      const c = String(code || "").trim().toLowerCase();
-      if (!c) return null;
+      const c = normalizeCode(code);
+      if (!c.raw) return null;
 
       return state.rows.find((r) => {
-        const codeVal = String(r.code || "").trim().toLowerCase();
-        if (!codeVal) return false;
-        return codeVal === c || codeVal.endsWith(`/${c}`);
+        const codeVal = normalizeCode(r.code || "");
+        if (!codeVal.raw) return false;
+
+        if (codeVal.raw === c.raw) return true;
+        if (codeVal.raw.endsWith(`/${c.raw}`)) return true;
+
+        // Accept numeric ids with/without leading zeros: 2 == 000002
+        if (codeVal.num && c.num && codeVal.num === c.num) return true;
+
+        return false;
       }) || null;
+    }
+
+    function normalizeCode(input) {
+      const raw = String(input || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^['"`]+|['"`]+$/g, "");
+
+      const onlyDigits = raw.replace(/\D/g, "");
+      const num = /^\d+$/.test(onlyDigits) ? String(Number(onlyDigits)) : "";
+
+      return { raw, num };
     }
 
     async function ensureData() {
