@@ -235,6 +235,23 @@
       return raw;
     }
 
+    function extractCodeFromAnyText(text) {
+      const raw = String(text || "").trim();
+      if (!raw) return "";
+
+      // Direct code value
+      if (!/^https?:\/\//i.test(raw)) return raw;
+
+      // URL with code parameter
+      try {
+        const u = new URL(raw);
+        const c = u.searchParams.get("code") || u.searchParams.get("qr") || u.searchParams.get("id");
+        return c ? String(c).trim() : "";
+      } catch (_) {
+        return "";
+      }
+    }
+
     function showMessage(text, isError = false) {
       el.status.textContent = text;
       el.status.classList.toggle("error", isError);
@@ -295,8 +312,12 @@
             getCandidate(row, ["фио3", "lastname", "name3", "фамилия"])
           );
 
+        const linkLike = getCandidate(row, ["ссылка", "link", "url", "profile", "site"]);
+        const rawCode = getCandidate(row, ["qr", "код", "id", "uid", "badge", "бейдж", "token", "номер"]);
+        const finalCode = extractCodeFromAnyText(rawCode) || extractCodeFromAnyText(linkLike);
+
         return {
-          code: getCandidate(row, ["qr", "код", "id", "uid", "badge", "бейдж", "token", "номер"]),
+          code: finalCode,
           fio,
           photo: normalizePhotoUrl(getCandidate(row, ["фото", "photo", "image", "avatar", "img", "photourl", "ссылкафото"])),
           raw: row
@@ -347,8 +368,13 @@
         .toLowerCase()
         .replace(/^['"`]+|['"`]+$/g, "");
 
-      const onlyDigits = raw.replace(/\D/g, "");
-      const num = /^\d+$/.test(onlyDigits) ? String(Number(onlyDigits)) : "";
+      let num = "";
+      const normalizedNum = raw.replace(",", ".");
+      if (/^\d+(\.0+)?$/.test(normalizedNum)) {
+        num = String(Math.trunc(Number(normalizedNum)));
+      } else if (/^\d+$/.test(raw)) {
+        num = String(Number(raw));
+      }
 
       return { raw, num };
     }
